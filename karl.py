@@ -86,9 +86,13 @@ class SentenceSegmenter(Segmenter):
     """
     badendings = re.compile("(?<=[.?!])(?=\S)")
 
-    def __init__(self):
+    def __init__(self,
+                word_separator = espaces,
+                charfilter_function = charfilter):
         self.method = SMSentence
         self.priority = 0
+
+        Segmenter.__init__(self, word_separator, charfilter_function)
 
         from nltk.tokenize.punkt import PunktSentenceTokenizer
         self.tokenizer = PunktSentenceTokenizer()
@@ -102,7 +106,12 @@ class ConcordanceSegmenter(Segmenter):
     Makes a segmentation from a word-based concordance.
     """
 
-    def __init__(self, word, nleft = 50, nright = 50):
+    def __init__(self,
+                    word,
+                    nleft = 50,
+                    nright = 50,
+                    word_separator = espaces,
+                    charfilter_function = charfilter):
         self.method = SMConcordance
         self.priority = 2
 
@@ -110,18 +119,24 @@ class ConcordanceSegmenter(Segmenter):
         self.nleft = nleft
         self.nright = nright
 
+        Segmenter.__init__(self, word_separator, charfilter_function)
+
     def parse(self, text):
         t = self.charfilter_func(text)
         wl = self.wordsep.split(t)
-        posls = np.arange(len(wl))[wl == word]
+        posls = np.arange(len(wl))[wl == self.word]
 
         return [ wl[max(i-nleft):i+nright] for i in posls ]
 
 class WordWindowSegmenter(Segmenter):
 
-    def __init__(self):
+    def __init__(self,
+                word_separator = espaces,
+                charfilter_function = charfilter):
         self.method = SMWordWindow
         self.priority = 2
+        
+        Segmenter.__init__(self, word_separator, charfilter_function)
 
     def parse(self, text):
         t = self.charfilter_func(text)
@@ -143,6 +158,7 @@ class Stemmer:
         """
 
         s = map(vector.stem, words)
+        s = map(s.index, s)
         self.map = np.array(s)
 
     def parse(self, wordlist):
@@ -221,7 +237,7 @@ class TextParser:
         segs = txtiter
 
         # Build unif & domif lists
-        unifs = np.unique(chain(*segs))
+        unifs = set(chain(*segs))
 
         # Remove the small things
         unifs = [ i for i in unifs if len(i) > 1 or (len(i) == 1 and i.isalpha()) ]
@@ -234,8 +250,6 @@ class TextParser:
 
         if self.wordfilter != None:
             self.wordfilter.build(unifs)
-
-        print len(self.wordfilter.map)
 
         segments = []
         for seg in segs:
@@ -258,9 +272,6 @@ class TextParser:
             c = coll.Counter(chain(*segs))
             freqmap = np.arange()
 
-        print unifs[:30]
-        print segs[0][:30]
-
         # Build data list for matrixes
         col = coll.deque()
         row = coll.deque()
@@ -269,13 +280,15 @@ class TextParser:
         segnum = 0
         for seg in segs:
             c = coll.Counter(seg)
-            row.extend([segnum] * len(seg))
+            row.extend([segnum] * len(c))
             col.extend(c.keys())
             data.extend(c.values())
 
+            segnum += 1
+
         # Save Matrix
         mat.segments = segs
-        mat.coo_matrix = sp.coo_matrix((data, (row, col)), shape = (len(row), len(mat.unifs)))
+        mat.coo_matrix = sp.coo_matrix((data, (row, col)), shape = (len(segs), len(mat.unifs)))
         mat.csr_matrix = mat.coo_matrix.tocsr()
 
         return mat
