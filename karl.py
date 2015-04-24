@@ -6,7 +6,8 @@
 import numpy as np
 import collections as coll
 import scipy.sparse as sp
-from itertools import chain
+from itertools import chain, ifilterfalse
+
 from pattern import vector
 
 import re
@@ -17,8 +18,10 @@ re.UNICODE = True
 nonLettre = re.compile(u"[0-9:;,.’()[\]*&?%$#@!~|\\\/=+_¬}{¬¤¢£°±\n\r‘’“”«—·–»…¡¿̀`~^><'\"\xa0]+")
 espaces = re.compile(u"[\s'-]+")
 def charfilter(text, re_pattern = nonLettre, spaces = espaces):
-    """Filter that removes punctuation and numbers, and replaces space-like"""
-    """characters with spaces."""
+    """
+    Filter that removes punctuation and numbers, and replaces space-like
+    characters with spaces.
+    """
 
     if type(text) not in [str, unicode]: return text
 
@@ -38,7 +41,9 @@ SMConcordance = 3
 SMWordWindow = 4
 
 class Segmenter:
-    """Segmenters split text into segments."""
+    """
+    Segmenters split text into segments.
+    """
     method = 0
     # Can be:
     #   1 - Paragraph
@@ -61,12 +66,25 @@ class Segmenter:
 
 class ParagraphSegmenter(Segmenter):
     """
-    Splits text into paragraph. The optional separator argument is a regular expression – by default, 2 or more linefeeds.
+    Splits text into paragraph. The optional separator argument is a regular
+    expression – by default, 2 or more linefeeds.
+
+    Parameters
+    ----------
+
+    separator: string, optional, default: "(\\n{2,}|\\r{2,}|(\\n\\r){2,})"
+        Regex string used to spot and segment paragraphs.
+
+    word_separator: sre.SRE_Pattern, optional, default: karl.espaces
+        Pattern used to spot spaces and separated words.
+
+    charfilter_function: function, optional, default: karl.charfilter
+        Filters unneeded characters, e.g. punctuation.
     """
 
     sep = "(\n{2,}|\r{2,}|(\n\r){2,})"
 
-    def __init__(self, separator = "(\n|\r|\n\r){2,}",
+    def __init__(self, separator = "(\n{2,}|\r{2,}|(\n\r){2,})",
                     word_separator = espaces,
                     charfilter_function = charfilter):
         self.method = SMParagraph
@@ -83,6 +101,15 @@ class ParagraphSegmenter(Segmenter):
 class SentenceSegmenter(Segmenter):
     """
     Splits text into paragraph. The optional separator argument is a regular expression – by default, 2 or more linefeeds.
+
+    Parameters
+    ----------
+
+    word_separator: sre.SRE_Pattern, optional, default: karl.espaces
+        Pattern used to spot spaces and separated words.
+
+    charfilter_function: function, optional, default: karl.charfilter
+        Filters unneeded characters, e.g. punctuation.
     """
     badendings = re.compile("(?<=[.?!])(?=\S)")
 
@@ -104,6 +131,22 @@ class SentenceSegmenter(Segmenter):
 class ConcordanceSegmenter(Segmenter):
     """
     Makes a segmentation from a word-based concordance.
+
+    Parameters
+    ----------
+
+    word: string, mandatory
+        Word to be used for concordance.
+
+    nleft: int, optional, default: 50
+    nright: int, optional, default: 50
+        How many words to retrieve on the right and on the left.
+
+    word_separator: sre.SRE_Pattern, optional, default: karl.espaces
+        Pattern used to spot spaces and separated words.
+
+    charfilter_function: function, optional, default: karl.charfilter
+        Filters unneeded characters, e.g. punctuation.
     """
 
     def __init__(self,
@@ -123,25 +166,43 @@ class ConcordanceSegmenter(Segmenter):
 
     def parse(self, text):
         t = self.charfilter_func(text)
-        wl = self.wordsep.split(t)
+        wl = np.array(self.wordsep.split(t))
         posls = np.arange(len(wl))[wl == self.word]
 
-        return [ wl[max(i-nleft):i+nright] for i in posls ]
+        return [ wl[max(i-self.nleft, 0):i+self.nright] for i in posls ]
 
 class WordWindowSegmenter(Segmenter):
+    """
+    Segments a text based on word windows.
+
+    Parameters
+    ----------
+
+    window: int, optional, default: 100
+        Number of words in the word window to retrieve.
+
+    word_separator: sre.SRE_Pattern, optional, default: karl.espaces
+        Pattern used to spot spaces and separated words.
+
+    charfilter_function: function, optional, default: karl.charfilter
+        Filters unneeded characters, e.g. punctuation.
+    """
 
     def __init__(self,
+                window = 100,
                 word_separator = espaces,
                 charfilter_function = charfilter):
         self.method = SMWordWindow
         self.priority = 2
-        
+
         Segmenter.__init__(self, word_separator, charfilter_function)
+
+        self.window = window
 
     def parse(self, text):
         t = self.charfilter_func(text)
         wl = self.wordsep.split(t)
-        return [ wl[x:x+window] for x in xrange(len(wl), step = window) ]
+        return [ wl[x:x+self.window] for x in xrange(len(wl), step = window) ]
 
 class Stemmer:
     """A Porter stemmer, exploits function from Pattern (Clips)"""
@@ -175,6 +236,28 @@ class TextParser:
     """
     Brings together all that is necessary to go from unstructured text to matrix
     object.
+
+    Parameters
+    ----------
+
+    segmentation_method: karl.Segmenter, optional, default: None
+        Object which splits text into workable chunks.
+
+    segmentfilter: function, optional, default: None
+        Filters segments, applied on fully treated segments (digitized word
+        lists).
+
+    wordfilter: karl.Stemmer, optional, default: None
+        Associate a word out to a word in. Used for stemming, lemmatization,
+        etc.
+
+    stoplist: list, optional, default: []
+        List of stopwords, to be removed from text to be analysed.
+
+    lower_freq_bound: float, optional, default: 0.0
+    upper_freq_bound: float, optional, default: 1.0
+        When the vocabulary is too large, can be used to set arbitrary bounds,
+        corresponding to the proportion of segments in which they appear.
     """
 
     segmentation_method = None
@@ -189,13 +272,13 @@ class TextParser:
 
 
     def __init__(self,
-            charfilter_function = charfilter,   # Filters characters we do not need, like some punctuation.
-            segmentation_method = None,         # Objects which inherit Segmenter. Splits text into workable chunks.
-            wordfilter = None,           # Word in → word out. Perfect for a stemmer.
+            segmentation_method = None,
+            segmentfilter = None,
+            wordfilter = None,
 
-            stoplist = [],                      # Stoplist
+            stoplist = [],
 
-            lower_freq_bound = 0.0,             # These parameters are for restraining number of unifs.
+            lower_freq_bound = 0.0,
             upper_freq_bound = 1.0
             ):
 
@@ -205,11 +288,11 @@ class TextParser:
             self.segmentation_method = segmentation_method
 
         self.wordfilter = wordfilter
+        self.segmentfilter = segmentfilter
 
         self.stoplist = stoplist
         self.lower_freq_bound = lower_freq_bound
         self.upper_freq_bound = upper_freq_bound
-        self.charfilter_function = charfilter_function
 
     def parse(self, text):
         '''Guesses best parsing function based on data type'''
@@ -221,11 +304,8 @@ class TextParser:
     def parse_unstructured_text(self, text):
         '''Unstructured, unsegmented text comes in. Segmented, digitized,'''
         '''matricized text comes out.'''
-        if self.segmentation_method.priority == 0:
-            segs = np.array(self.segmentation_method.parse(text))
-            segs = np.array(map(self.charfilter_function,segs))
-        elif self.segmentation_method.priority == 1:
-            segs = np.array(self.segmentation_method.parse(self.charfilter_function(text)))
+
+        segs = np.array(self.segmentation_method.parse(text))
 
         return self.parse_segmented_text(segs)
 
@@ -242,6 +322,9 @@ class TextParser:
         # Remove the small things
         unifs = [ i for i in unifs if len(i) > 1 or (len(i) == 1 and i.isalpha()) ]
 
+        # Remove stopwords
+        unifs = ifilterfalse(self.stoplist.__contains__, unifs)
+
         # Save unifs and domifs
         mat.unifs = np.array(unifs)
         mat.domifs = np.arange(len(segs))
@@ -253,19 +336,20 @@ class TextParser:
 
         segments = []
         for seg in segs:
+            # Filter words -- they ought to be contained in predetermined list
             s = filter(unifs.__contains__, seg)
+
+            # Digitize
             s = map(unifs.index, s)
+
+            # Applies stemming/lemmarization
             if self.wordfilter != None:
                 s = self.wordfilter.parse(s)
+
             segments.append(s)
 
-        segs = segments
-
-        # if self.wordfilter_method == None:
-        #     segs = np.array([ map(unifs.index, i) for i in segs ])
-        # else:
-        #     self.wordfilter_method.build(mat.unifs)
-        #     segs = np.array([ self.wordfilter_method.parse(map(unifs.index, i)) for i in segs ])
+        # Filters unwanted segments
+        segs = filter(self.segmentfilter, segments)
 
         # Apply boundaries to cut out to frequent or two infrequent
         if self.lower_freq_bound != 0.0 or self.upper_freq_bound != 1.0:
