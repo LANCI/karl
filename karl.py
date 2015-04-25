@@ -503,7 +503,7 @@ def chi2(matrix, index):
     incluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
     incluster[index] = 1
     outofcluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
-    outofcluster[] = 1
+    outofcluster[invindex] = 1
 
     # Get the matrixes
     matrice = matrix.coo_matrix.todense().clip(0,1)
@@ -547,7 +547,7 @@ def chi2P(matrix, index):
     incluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
     incluster[index] = 1
     outofcluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
-    outofcluster[] = 1
+    outofcluster[invindex] = 1
 
     # Get the matrixes
     matrice = matrix.coo_matrix.todense().clip(0,1)
@@ -600,7 +600,7 @@ def gini(matrix):
     incluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
     incluster[index] = 1
     outofcluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
-    outofcluster[] = 1
+    outofcluster[invindex] = 1
 
     # Get the matrixes
     matrice = matrix.coo_matrix.todense().clip(0,1)
@@ -644,7 +644,7 @@ def information_gain(matrix):
     incluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
     incluster[index] = 1
     outofcluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
-    outofcluster[] = 1
+    outofcluster[invindex] = 1
 
     # Get the matrixes
     matrice = matrix.coo_matrix.todense().clip(0,1)
@@ -692,7 +692,7 @@ def binormal_separation(matrix, index):
     incluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
     incluster[index] = 1
     outofcluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
-    outofcluster[] = 1
+    outofcluster[invindex] = 1
 
     # Get the matrixes
     matrice = matrix.coo_matrix.todense().clip(0,1)
@@ -736,7 +736,7 @@ def tScore(matrix, index):
     incluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
     incluster[index] = 1
     outofcluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
-    outofcluster[] = 1
+    outofcluster[invindex] = 1
 
     # Get the matrixes
     matrice = matrix.coo_matrix.todense().clip(0,1)
@@ -779,7 +779,7 @@ def mutual_information(matrix, index):
     incluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
     incluster[index] = 1
     outofcluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
-    outofcluster[] = 1
+    outofcluster[invindex] = 1
 
     # Get the matrixes
     matrice = matrix.coo_matrix.todense().clip(0,1)
