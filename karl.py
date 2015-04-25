@@ -36,10 +36,6 @@ def charfilter(text, re_pattern = nonLettre, spaces = espaces):
 # They split roughly unstructured text into slightly more manageable chunks
 
 # Preset choice values:
-SMParagraph = 1
-SMSentence = 2
-SMConcordance = 3
-SMWordWindow = 4
 
 class Segmenter:
     """
@@ -92,7 +88,6 @@ class ParagraphSegmenter(Segmenter):
                     word_separator = espaces,
                     charfilter_function = charfilter,
                     segmentre = None):
-        self.method = SMParagraph
         self.priority = 0
         self.sep = separator
         self.segmentre = segmentre
@@ -140,7 +135,6 @@ class SentenceSegmenter(Segmenter):
                 word_separator = espaces,
                 charfilter_function = charfilter,
                 segmentre = None):
-        self.method = SMSentence
         self.priority = 0
         self.segmentre = segmentre
 
@@ -189,7 +183,6 @@ class ConcordanceSegmenter(Segmenter):
                     nright = 50,
                     word_separator = espaces,
                     charfilter_function = charfilter):
-        self.method = SMConcordance
         self.priority = 2
 
         self.word = word
@@ -220,23 +213,36 @@ class WordWindowSegmenter(Segmenter):
 
     charfilter_function: function, optional, default: karl.charfilter
         Filters unneeded characters, e.g. punctuation.
+
+    segmentre: sre.SRE_Pattern, optional, default: None
+        Only keep segments which contains one re more word that matches this
+        pattern.
     """
 
     def __init__(self,
                 window = 100,
                 word_separator = espaces,
-                charfilter_function = charfilter):
-        self.method = SMWordWindow
+                charfilter_function = charfilter,
+                segmentre = None):
         self.priority = 2
 
         Segmenter.__init__(self, word_separator, charfilter_function)
 
         self.window = window
+        self.segmentre = segmentre
 
     def parse(self, text):
         t = self.charfilter_func(text)
         wl = self.wordsep.split(t)
-        return [ wl[x:x+self.window] for x in xrange(len(wl), step = window) ]
+
+        # Make word windows
+        r = [ wl[x:x+self.window] for x in xrange(0, len(wl), self.window) ]
+
+        # Apply segment filter
+        if self.segmentre != None:
+            r = [ i for i in r if any(map(self.segmentre.match,i)) ]
+
+        return r
 
 class Stemmer:
     """A Porter stemmer, exploits function from Pattern (Clips)"""
@@ -517,7 +523,7 @@ def chi2(matrix, index):
     N = n11 + n10 + n01 + n00
     r= N * ( n11 * n00 - n10 * n01)**2 / np.array( (n11+n00) * (n11+n10) * (n00+n01) * (n00+n10), dtype=float )
 
-    return sorted(zip(r, mat.unifs), reverse=True)
+    return sorted(zip(r, matrix.unifs), reverse=True)
 
 def chi2P(matrix, index):
     """
@@ -562,7 +568,7 @@ def chi2P(matrix, index):
 
     nC = a+b
     nnC = c+d
-    lambdai = fterm/mat.sum()
+    lambdai = fterm/matrice.sum()
 
     ae = nC * (1 - np.exp(-lambdai))
     be = nC * np.exp(-lambdai)
@@ -570,7 +576,7 @@ def chi2P(matrix, index):
     de = nnC * np.exp(-lambdai)
 
     chi2P = ((a-ae)**2 / ae) + ((b-be)**2 / be) + ((c-ce)**2 / ce) + ((d-de)**2 / de)
-    return sorted(zip(chi2P, mat.unifs), reverse=True)
+    return sorted(zip(chi2P, matrix.unifs), reverse=True)
 
 def gini(matrix):
     """
@@ -614,7 +620,7 @@ def gini(matrix):
     d = np.squeeze(np.asarray((outofcluster * invmatrice).sum(0)))
 
     gini = ( 1 / ((a+c)**2) ) * ( ((a**2 / (a+b))**2) + ((c**2 / (c+d))**2) )
-    return sorted(zip(gini, mat.unifs), reverse=True)
+    return sorted(zip(gini, matrix.unifs), reverse=True)
 
 def information_gain(matrix):
     """
@@ -664,7 +670,7 @@ def information_gain(matrix):
          (c/N) * np.log( (c/N) / ( ((a+c)/N) * ((c+d)/N) ) ) + \
          (d/N) * np.log( (d/N) / ( ((b+d)/N) * ((c+d)/N) ) )
 
-    return sorted(zip(IG, mat.unifs), reverse=True)
+    return sorted(zip(IG, matrix.unifs), reverse=True)
 
 def binormal_separation(matrix, index):
     """
@@ -708,7 +714,7 @@ def binormal_separation(matrix, index):
 
     BNS = abs(norm.ppf(tpr)-norm.ppf(fpr))
 
-    return sorted(zip(BNS, mat.unifs), reverse=True)
+    return sorted(zip(BNS, matrix.unifs), reverse=True)
 
 def tScore(matrix, index):
     """
@@ -751,7 +757,7 @@ def tScore(matrix, index):
     i = fXC > 0
     tScore = ( fXC[i] - ( fX[i] * fC / float(N) ) ) / np.sqrt(fXC[i])
 
-    return sorted(zip(tScore, mat.unifs), reverse=True)
+    return sorted(zip(tScore, matrix.unifs), reverse=True)
 
 def mutual_information(matrix, index):
     """
@@ -794,4 +800,4 @@ def mutual_information(matrix, index):
     i = fXC > 0
     MI[i] = np.log( fXC[i] * N / (fX[i] * fC))
 
-    return sorted(zip(MI, mat.unifs), reverse=True)
+    return sorted(zip(MI, matrix.unifs), reverse=True)
