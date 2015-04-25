@@ -1,12 +1,13 @@
 # *.* coding: utf-8 *.*
 # Karl, by Louis Chartrand 2015
 
-# Requires: numpy, scipy, nltk
+# Requires: numpy, scipy, pattern
 
 import numpy as np
 import collections as coll
 import scipy.sparse as sp
-from itertools import chain, ifilterfalse
+from itertools import chain, ifilter, ifilterfalse
+from scipy.stats import norm
 
 from pattern import vector
 
@@ -72,7 +73,7 @@ class ParagraphSegmenter(Segmenter):
     Parameters
     ----------
 
-    separator: string, optional, default: "(\\n{2,}|\\r{2,}|(\\n\\r){2,})"
+    separator: string, optional, default: "\\n{2,}|"
         Regex string used to spot and segment paragraphs.
 
     word_separator: sre.SRE_Pattern, optional, default: karl.espaces
@@ -80,27 +81,46 @@ class ParagraphSegmenter(Segmenter):
 
     charfilter_function: function, optional, default: karl.charfilter
         Filters unneeded characters, e.g. punctuation.
+
+    segmentre: sre.SRE_Pattern, optional, default: None
+        Only keep segments that matches this pattern.
     """
 
-    sep = "(\n{2,}|\r{2,}|(\n\r){2,})"
+    sep = "\n{2,}"
 
-    def __init__(self, separator = "(\n{2,}|\r{2,}|(\n\r){2,})",
+    def __init__(self, separator = "\n{2,}",
                     word_separator = espaces,
-                    charfilter_function = charfilter):
+                    charfilter_function = charfilter,
+                    segmentre = None):
         self.method = SMParagraph
         self.priority = 0
         self.sep = separator
+        self.segmentre = segmentre
 
         Segmenter.__init__(self, word_separator, charfilter_function)
 
     def parse(self, text):
+
+        # Standardize returns
+        t = text.replace("\n\r", "\n")
+        t = t.replace("\r", "\n")
+
+        # Split
         r = re.split(self.sep, text)
+
+        # Apply character filter
         r = map(self.charfilter_func, r)
+
+        # Apply segment filter
+        if self.segmentre != None:
+            r = filter(self.segmentre.match, r)
+
         return [ self.wordsep.split(i) for i in r]
 
 class SentenceSegmenter(Segmenter):
     """
-    Splits text into paragraph. The optional separator argument is a regular expression – by default, 2 or more linefeeds.
+    Splits text into paragraph. The optional separator argument is a regular
+    expression – by default, 2 or more linefeeds.
 
     Parameters
     ----------
@@ -110,14 +130,19 @@ class SentenceSegmenter(Segmenter):
 
     charfilter_function: function, optional, default: karl.charfilter
         Filters unneeded characters, e.g. punctuation.
+
+    segmentre: sre.SRE_Pattern, optional, default: None
+        Only keep segments that matches this pattern.
     """
     badendings = re.compile("(?<=[.?!])(?=\S)")
 
     def __init__(self,
                 word_separator = espaces,
-                charfilter_function = charfilter):
+                charfilter_function = charfilter,
+                segmentre = None):
         self.method = SMSentence
         self.priority = 0
+        self.segmentre = segmentre
 
         Segmenter.__init__(self, word_separator, charfilter_function)
 
@@ -126,7 +151,16 @@ class SentenceSegmenter(Segmenter):
 
     def parse(self, text):
         t = self.badendings.sub(" ",text)
-        return self.tokenizer.tokenize(t)
+        r = self.tokenizer.tokenize(t)
+
+        # Apply character filter
+        r = map(self.charfilter_func, r)
+
+        # Apply segment filter
+        if self.segmentre != one:
+            r = filter(self.segmentre.match, r)
+
+        return r
 
 class ConcordanceSegmenter(Segmenter):
     """
@@ -243,10 +277,6 @@ class TextParser:
     segmentation_method: karl.Segmenter, optional, default: None
         Object which splits text into workable chunks.
 
-    segmentfilter: function, optional, default: None
-        Filters segments, applied on fully treated segments (digitized word
-        lists).
-
     wordfilter: karl.Stemmer, optional, default: None
         Associate a word out to a word in. Used for stemming, lemmatization,
         etc.
@@ -273,7 +303,6 @@ class TextParser:
 
     def __init__(self,
             segmentation_method = None,
-            segmentfilter = None,
             wordfilter = None,
 
             stoplist = [],
@@ -288,7 +317,6 @@ class TextParser:
             self.segmentation_method = segmentation_method
 
         self.wordfilter = wordfilter
-        self.segmentfilter = segmentfilter
 
         self.stoplist = stoplist
         self.lower_freq_bound = lower_freq_bound
@@ -302,8 +330,10 @@ class TextParser:
             return self.parse_segmented_text(text)
 
     def parse_unstructured_text(self, text):
-        '''Unstructured, unsegmented text comes in. Segmented, digitized,'''
-        '''matricized text comes out.'''
+        '''
+        Unstructured, unsegmented text comes in. Segmented, digitized,
+        matricized text comes out.
+        '''
 
         segs = np.array(self.segmentation_method.parse(text))
 
@@ -323,7 +353,7 @@ class TextParser:
         unifs = [ i for i in unifs if len(i) > 1 or (len(i) == 1 and i.isalpha()) ]
 
         # Remove stopwords
-        unifs = ifilterfalse(self.stoplist.__contains__, unifs)
+        unifs = list(ifilterfalse(self.stoplist.__contains__, unifs))
 
         # Save unifs and domifs
         mat.unifs = np.array(unifs)
@@ -348,8 +378,7 @@ class TextParser:
 
             segments.append(s)
 
-        # Filters unwanted segments
-        segs = filter(self.segmentfilter, segments)
+        segs = segments
 
         # Apply boundaries to cut out to frequent or two infrequent
         if self.lower_freq_bound != 0.0 or self.upper_freq_bound != 1.0:
@@ -444,3 +473,325 @@ class Matrix:
         self.csr_matrix = t
 
         del self.unifs[i]
+
+#
+# Association measures
+#
+
+def chi2(matrix, index):
+    """
+    Calculates χ² association between a segment extension and each words it
+    contains.
+
+    Parameters
+    ----------
+
+    matrix: karl.Matrix
+        The matrix in which the association is to be calculated
+
+    index: list of booleans or list of integers
+        Indexes segments which form the extension with which the association is
+        to be measured.
+    """
+
+    # Index is set; we need an index set for the "outgroup"
+    m = len(matrix.segments)
+    invindex = np.ones(m, dtype = bool)
+    invindex[index] = False
+
+    # Get the sets
+    incluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
+    incluster[index] = 1
+    outofcluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
+    outofcluster[] = 1
+
+    # Get the matrixes
+    matrice = matrix.coo_matrix.todense().clip(0,1)
+    invmatrice = abs(matrice-1)
+
+    n11 = np.squeeze(np.asarray((incluster * matrice).sum(0)))
+    n10 = np.squeeze(np.asarray((incluster * invmatrice).sum(0)))
+    n01 = np.squeeze(np.asarray((outofcluster * matrice).sum(0)))
+    n00 = np.squeeze(np.asarray((outofcluster * invmatrice).sum(0)))
+
+    N = n11 + n10 + n01 + n00
+    r= N * ( n11 * n00 - n10 * n01)**2 / np.array( (n11+n00) * (n11+n10) * (n00+n01) * (n00+n10), dtype=float )
+
+    return sorted(zip(r, mat.unifs), reverse=True)
+
+def chi2P(matrix, index):
+    """
+    Calculates χ²P association between a segment extension and each words it
+    contains.
+
+    Parameters
+    ----------
+
+    matrix: karl.Matrix
+        The matrix in which the association is to be calculated
+
+    index: list of booleans or list of integers
+        Indexes segments which form the extension with which the association is
+        to be measured.
+
+    From Ogura, Amano & Kondo (2010), "Distinctive characteristics of a metric
+    using deviations from Poisson for feature selection"
+    """
+
+    # Index is set; we need an index set for the "outgroup"
+    m = len(matrix.segments)
+    invindex = np.ones(m, dtype = bool)
+    invindex[index] = False
+
+    # Get the sets
+    incluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
+    incluster[index] = 1
+    outofcluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
+    outofcluster[] = 1
+
+    # Get the matrixes
+    matrice = matrix.coo_matrix.todense().clip(0,1)
+    invmatrice = abs(matrice-1)
+
+    fterm = matrice.sum(0)
+
+    a = np.squeeze(np.asarray((incluster * matrice).sum(0)))
+    b = np.squeeze(np.asarray((incluster * invmatrice).sum(0)))
+    c = np.squeeze(np.asarray((outofcluster * matrice).sum(0)))
+    d = np.squeeze(np.asarray((outofcluster * invmatrice).sum(0)))
+
+    nC = a+b
+    nnC = c+d
+    lambdai = fterm/mat.sum()
+
+    ae = nC * (1 - np.exp(-lambdai))
+    be = nC * np.exp(-lambdai)
+    ce = nnC * (1 - np.exp(-lambdai))
+    de = nnC * np.exp(-lambdai)
+
+    chi2P = ((a-ae)**2 / ae) + ((b-be)**2 / be) + ((c-ce)**2 / ce) + ((d-de)**2 / de)
+    return sorted(zip(chi2P, mat.unifs), reverse=True)
+
+def gini(matrix):
+    """
+    Calculates Gini association between a segment extension and each words it
+    contains.
+
+    Parameters
+    ----------
+
+    matrix: karl.Matrix
+        The matrix in which the association is to be calculated
+
+    index: list of booleans or list of integers
+        Indexes segments which form the extension with which the association is
+        to be measured.
+
+    From Ogura, Amano & Kondo (2010), "Distinctive characteristics of a metric
+    using deviations from Poisson for feature selection"
+    """
+
+    # Index is set; we need an index set for the "outgroup"
+    m = len(matrix.segments)
+    invindex = np.ones(m, dtype = bool)
+    invindex[index] = False
+
+    # Get the sets
+    incluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
+    incluster[index] = 1
+    outofcluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
+    outofcluster[] = 1
+
+    # Get the matrixes
+    matrice = matrix.coo_matrix.todense().clip(0,1)
+    invmatrice = abs(matrice-1)
+
+    fterm = matrice.sum(0)
+
+    a = np.squeeze(np.asarray((incluster * matrice).sum(0)))
+    b = np.squeeze(np.asarray((incluster * invmatrice).sum(0)))
+    c = np.squeeze(np.asarray((outofcluster * matrice).sum(0)))
+    d = np.squeeze(np.asarray((outofcluster * invmatrice).sum(0)))
+
+    gini = ( 1 / ((a+c)**2) ) * ( ((a**2 / (a+b))**2) + ((c**2 / (c+d))**2) )
+    return sorted(zip(gini, mat.unifs), reverse=True)
+
+def information_gain(matrix):
+    """
+    Calculates information gain between a segment extension and each words it
+    contains.
+
+    Parameters
+    ----------
+
+    matrix: karl.Matrix
+        The matrix in which the association is to be calculated
+
+    index: list of booleans or list of integers
+        Indexes segments which form the extension with which the association is
+        to be measured.
+
+    From Ogura, Amano & Kondo (2010), "Distinctive characteristics of a metric
+    using deviations from Poisson for feature selection"
+    """
+
+    # Index is set; we need an index set for the "outgroup"
+    m = len(matrix.segments)
+    invindex = np.ones(m, dtype = bool)
+    invindex[index] = False
+
+    # Get the sets
+    incluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
+    incluster[index] = 1
+    outofcluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
+    outofcluster[] = 1
+
+    # Get the matrixes
+    matrice = matrix.coo_matrix.todense().clip(0,1)
+    invmatrice = abs(matrice-1)
+
+    fterm = matrice.sum(0)
+
+    a = np.squeeze(np.asarray((incluster * matrice).sum(0)))
+    b = np.squeeze(np.asarray((incluster * invmatrice).sum(0)))
+    c = np.squeeze(np.asarray((outofcluster * matrice).sum(0)))
+    d = np.squeeze(np.asarray((outofcluster * invmatrice).sum(0)))
+
+    N = a+b+c+d
+
+    IG = (a/N) * np.log( (a/N) / ( ((a+c)/N) * ((a+b)/N) ) ) + \
+         (b/N) * np.log( (b/N) / ( ((b+d)/N) * ((a+b)/N) ) ) + \
+         (c/N) * np.log( (c/N) / ( ((a+c)/N) * ((c+d)/N) ) ) + \
+         (d/N) * np.log( (d/N) / ( ((b+d)/N) * ((c+d)/N) ) )
+
+    return sorted(zip(IG, mat.unifs), reverse=True)
+
+def binormal_separation(matrix, index):
+    """
+    Calculates the binormal separation between a segment extension and each words
+    it contains.
+
+    Parameters
+    ----------
+
+    matrix: karl.Matrix
+        The matrix in which the association is to be calculated
+
+    index: list of booleans or list of integers
+        Indexes segments which form the extension with which the association is
+        to be measured.
+
+    """
+
+    # Index is set; we need an index set for the "outgroup"
+    m = len(matrix.segments)
+    invindex = np.ones(m, dtype = bool)
+    invindex[index] = False
+
+    # Get the sets
+    incluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
+    incluster[index] = 1
+    outofcluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
+    outofcluster[] = 1
+
+    # Get the matrixes
+    matrice = matrix.coo_matrix.todense().clip(0,1)
+    invmatrice = abs(matrice-1)
+
+    a = np.squeeze(np.asarray((incluster * matrice).sum(0)))
+    b = np.squeeze(np.asarray((incluster * invmatrice).sum(0)))
+    c = np.squeeze(np.asarray((outofcluster * matrice).sum(0)))
+    d = np.squeeze(np.asarray((outofcluster * invmatrice).sum(0)))
+
+    tpr = a / np.array(a + c, dtype=float)
+    fpr = b / np.array(b + d, dtype=float)
+
+    BNS = abs(norm.ppf(tpr)-norm.ppf(fpr))
+
+    return sorted(zip(BNS, mat.unifs), reverse=True)
+
+def tScore(matrix, index):
+    """
+    Calculates the t-score between a segment extension and each words it
+    contains.
+
+    Parameters
+    ----------
+
+    matrix: karl.Matrix
+        The matrix in which the association is to be calculated
+
+    index: list of booleans or list of integers
+        Indexes segments which form the extension with which the association is
+        to be measured.
+
+    """
+
+    # Index is set; we need an index set for the "outgroup"
+    m = len(matrix.segments)
+    invindex = np.ones(m, dtype = bool)
+    invindex[index] = False
+
+    # Get the sets
+    incluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
+    incluster[index] = 1
+    outofcluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
+    outofcluster[] = 1
+
+    # Get the matrixes
+    matrice = matrix.coo_matrix.todense().clip(0,1)
+    invmatrice = abs(matrice-1)
+
+    N = matrice.sum()
+    fXC = np.squeeze(np.asarray((incluster * matrice).sum(0)))
+    fX = np.squeeze(np.asarray(matrice.sum(0)))
+    fC = len(index) - invindex.sum()
+
+    tScore = np.zeros(len(fXC))
+    i = fXC > 0
+    tScore = ( fXC[i] - ( fX[i] * fC / float(N) ) ) / np.sqrt(fXC[i])
+
+    return sorted(zip(tScore, mat.unifs), reverse=True)
+
+def mutual_information(matrix, index):
+    """
+    Calculates the mutual information between a segment extension and each words
+    it contains.
+
+    Parameters
+    ----------
+
+    matrix: karl.Matrix
+        The matrix in which the association is to be calculated
+
+    index: list of booleans or list of integers
+        Indexes segments which form the extension with which the association is
+        to be measured.
+
+    """
+
+    # Index is set; we need an index set for the "outgroup"
+    m = len(matrix.segments)
+    invindex = np.ones(m, dtype = bool)
+    invindex[index] = False
+
+    # Get the sets
+    incluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
+    incluster[index] = 1
+    outofcluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
+    outofcluster[] = 1
+
+    # Get the matrixes
+    matrice = matrix.coo_matrix.todense().clip(0,1)
+    invmatrice = abs(matrice-1)
+
+    N = matrice.sum()
+    fXC = np.squeeze(np.asarray((incluster * matrice).sum(0)))
+    fX = np.squeeze(np.asarray(matrice.sum(0)))
+    fC = len(index) - invindex.sum()
+
+    MI = np.zeros(len(fXC))
+    i = fXC > 0
+    MI[i] = np.log( fXC[i] * N / (fX[i] * fC))
+
+    return sorted(zip(MI, mat.unifs), reverse=True)
