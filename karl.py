@@ -406,7 +406,7 @@ class TextParser:
             segnum += 1
 
         # Save Matrix
-        mat.segments = segs
+        mat.segments = np.array(segs)
         mat.coo_matrix = sp.coo_matrix((data, (row, col)), shape = (len(segs), len(mat.unifs)))
         mat.csr_matrix = mat.coo_matrix.tocsr()
 
@@ -435,32 +435,38 @@ class Matrix:
     def __repr__(self):
         return self.csr_matrix.__repr__()
 
-    def _str2colindex(s):
+    def _str2colindex(self,s):
         if type(s) not in [str, unicode]:
             return s
 
         return [ val(i) if i.isdigit() else self.unifs.index(i) for i in espaces.split(s) ]
 
-    def _str2rowindex(s):
+    def _str2rowindex(self,s):
         if type(s) not in [str, unicode]:
             return s
 
         return [ val(i) if i.isdigit() else self.domifs.index(i) for i in espaces.split(s) ]
 
     def __getitem__(self, index):
-        return Matrix(None, self.csr_matrix[index], segments[index], self.unifs, domifs[index])
+        return Matrix(
+                    csr_matrix = self.csr_matrix[index],
+                    segments = self.segments[index],
+                    unifs = self.unifs,
+                    domifs = self.domifs[index]
+                    )
 
     def __setitem__(self, index, value):
         self.csr_matrix[index] = value
 
     def __delitem__(self, index):
-        del self.csr_matrix[index]
-        del self.domifs[index]
+        invindex = np.ones(len(index), dtype = bool)
+        self.csr_matrix = self.csr_matrix[index]
+        self.domifs = self.domifs[index]
 
     def get_column(self, index):
         i = self._str2colindex(index)
         return Matrix(
-            csr_matrix = self.csr_matrix.transpose()[i],
+            csr_matrix = self.csr_matrix[:,i],
             segments = self.segments,
             unifs = self.unifs[i],
             domifs = self.domifs
@@ -468,21 +474,58 @@ class Matrix:
 
     def set_column(self, index, value):
         i = self._str2colindex(index)
-        t = self.csr_matrix.transpose()
-        t[i] = value
-        self.csr_matrix = t
+        self.csr_matrix[:,i] = t
 
     def del_column(self, index):
         i = self._str2colindex(index)
-        t = self.csr_matrix.transpose()
-        del t[i]
-        self.csr_matrix = t
 
-        del self.unifs[i]
+        invindex = np.ones(self.csr_matrix.shape[1], dtype=bool)
+        invindex[i] = False
+        self.csr_matrix = self.csr_matrix[:,invindex]
+        self.unifs = self.unifs[invindex]
+
+    def purge_unused_unifs(self):
+        idx = self.csr_matrix.sum(0) == 0
+        self.del_column(idx)
 
 #
 # Association measures
 #
+
+def _get_abcd(matrix, index, fterm = False):
+    """
+    Internal usage. Gets parameters for association measures.
+    """
+
+    m = len(matrix.segments)
+    invindex = np.ones(m, dtype = bool)
+    invindex[index] = False
+
+    # Get the sets
+    incluster = np.zeros(matrix.csr_matrix.shape[0], dtype=int)
+    incluster[index] = 1
+    outofcluster = np.zeros(matrix.csr_matrix.shape[0], dtype=int)
+    outofcluster[invindex] = 1
+
+    # Get the matrixes
+    matrice = matrix.csr_matrix.todense().clip(0,1)
+    invmatrice = abs(matrice-1)
+
+    # Filter out words absent from index
+    notempty = np.squeeze(np.asarray(matrice[index].sum(0) != 0))
+    matrice = matrice.T[notempty].T
+    invmatrice = invmatrice.T[notempty].T
+    unifs = matrix.unifs[notempty]
+
+    a = np.squeeze(np.asarray((incluster * matrice).sum(0)))
+    b = np.squeeze(np.asarray((incluster * invmatrice).sum(0)))
+    c = np.squeeze(np.asarray((outofcluster * matrice).sum(0)))
+    d = np.squeeze(np.asarray((outofcluster * invmatrice).sum(0)))
+
+    if fterm: # For chi2P
+        return a,b,c,d, unifs, np.squeeze(np.asarray(matrice.sum(0)))
+    else:
+        return a,b,c,d, unifs
 
 def chi2(matrix, index):
     """
@@ -500,30 +543,12 @@ def chi2(matrix, index):
         to be measured.
     """
 
-    # Index is set; we need an index set for the "outgroup"
-    m = len(matrix.segments)
-    invindex = np.ones(m, dtype = bool)
-    invindex[index] = False
-
-    # Get the sets
-    incluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
-    incluster[index] = 1
-    outofcluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
-    outofcluster[invindex] = 1
-
-    # Get the matrixes
-    matrice = matrix.coo_matrix.todense().clip(0,1)
-    invmatrice = abs(matrice-1)
-
-    n11 = np.squeeze(np.asarray((incluster * matrice).sum(0)))
-    n10 = np.squeeze(np.asarray((incluster * invmatrice).sum(0)))
-    n01 = np.squeeze(np.asarray((outofcluster * matrice).sum(0)))
-    n00 = np.squeeze(np.asarray((outofcluster * invmatrice).sum(0)))
+    n11, n10, n01, n00, unifs = _get_abcd(matrix, index)
 
     N = n11 + n10 + n01 + n00
     r= N * ( n11 * n00 - n10 * n01)**2 / np.array( (n11+n00) * (n11+n10) * (n00+n01) * (n00+n10), dtype=float )
 
-    return sorted(zip(r, matrix.unifs), reverse=True)
+    return sorted(zip(r, unifs), reverse=True)
 
 def chi2P(matrix, index):
     """
@@ -544,27 +569,7 @@ def chi2P(matrix, index):
     using deviations from Poisson for feature selection"
     """
 
-    # Index is set; we need an index set for the "outgroup"
-    m = len(matrix.segments)
-    invindex = np.ones(m, dtype = bool)
-    invindex[index] = False
-
-    # Get the sets
-    incluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
-    incluster[index] = 1
-    outofcluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
-    outofcluster[invindex] = 1
-
-    # Get the matrixes
-    matrice = matrix.coo_matrix.todense().clip(0,1)
-    invmatrice = abs(matrice-1)
-
-    fterm = matrice.sum(0)
-
-    a = np.squeeze(np.asarray((incluster * matrice).sum(0)))
-    b = np.squeeze(np.asarray((incluster * invmatrice).sum(0)))
-    c = np.squeeze(np.asarray((outofcluster * matrice).sum(0)))
-    d = np.squeeze(np.asarray((outofcluster * invmatrice).sum(0)))
+    a,b,c,d, unifs, fterm = _get_abcd(matrix, index, fterm = True)
 
     nC = a+b
     nnC = c+d
@@ -576,9 +581,9 @@ def chi2P(matrix, index):
     de = nnC * np.exp(-lambdai)
 
     chi2P = ((a-ae)**2 / ae) + ((b-be)**2 / be) + ((c-ce)**2 / ce) + ((d-de)**2 / de)
-    return sorted(zip(chi2P, matrix.unifs), reverse=True)
+    return sorted(zip(chi2P, unifs), reverse=True)
 
-def gini(matrix):
+def gini(matrix, index):
     """
     Calculates Gini association between a segment extension and each words it
     contains.
@@ -597,32 +602,12 @@ def gini(matrix):
     using deviations from Poisson for feature selection"
     """
 
-    # Index is set; we need an index set for the "outgroup"
-    m = len(matrix.segments)
-    invindex = np.ones(m, dtype = bool)
-    invindex[index] = False
-
-    # Get the sets
-    incluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
-    incluster[index] = 1
-    outofcluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
-    outofcluster[invindex] = 1
-
-    # Get the matrixes
-    matrice = matrix.coo_matrix.todense().clip(0,1)
-    invmatrice = abs(matrice-1)
-
-    fterm = matrice.sum(0)
-
-    a = np.squeeze(np.asarray((incluster * matrice).sum(0)))
-    b = np.squeeze(np.asarray((incluster * invmatrice).sum(0)))
-    c = np.squeeze(np.asarray((outofcluster * matrice).sum(0)))
-    d = np.squeeze(np.asarray((outofcluster * invmatrice).sum(0)))
+    a,b,c,d, unifs = _get_abcd(matrix, index)
 
     gini = ( 1 / ((a+c)**2) ) * ( ((a**2 / (a+b))**2) + ((c**2 / (c+d))**2) )
-    return sorted(zip(gini, matrix.unifs), reverse=True)
+    return sorted(zip(gini, unifs), reverse=True)
 
-def information_gain(matrix):
+def information_gain(matrix, index):
     """
     Calculates information gain between a segment extension and each words it
     contains.
@@ -641,27 +626,7 @@ def information_gain(matrix):
     using deviations from Poisson for feature selection"
     """
 
-    # Index is set; we need an index set for the "outgroup"
-    m = len(matrix.segments)
-    invindex = np.ones(m, dtype = bool)
-    invindex[index] = False
-
-    # Get the sets
-    incluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
-    incluster[index] = 1
-    outofcluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
-    outofcluster[invindex] = 1
-
-    # Get the matrixes
-    matrice = matrix.coo_matrix.todense().clip(0,1)
-    invmatrice = abs(matrice-1)
-
-    fterm = matrice.sum(0)
-
-    a = np.squeeze(np.asarray((incluster * matrice).sum(0)))
-    b = np.squeeze(np.asarray((incluster * invmatrice).sum(0)))
-    c = np.squeeze(np.asarray((outofcluster * matrice).sum(0)))
-    d = np.squeeze(np.asarray((outofcluster * invmatrice).sum(0)))
+    a,b,c,d, unifs = _get_abcd(matrix, index)
 
     N = a+b+c+d
 
@@ -670,7 +635,7 @@ def information_gain(matrix):
          (c/N) * np.log( (c/N) / ( ((a+c)/N) * ((c+d)/N) ) ) + \
          (d/N) * np.log( (d/N) / ( ((b+d)/N) * ((c+d)/N) ) )
 
-    return sorted(zip(IG, matrix.unifs), reverse=True)
+    return sorted(zip(IG, unifs), reverse=True)
 
 def binormal_separation(matrix, index):
     """
@@ -689,32 +654,49 @@ def binormal_separation(matrix, index):
 
     """
 
-    # Index is set; we need an index set for the "outgroup"
-    m = len(matrix.segments)
-    invindex = np.ones(m, dtype = bool)
-    invindex[index] = False
-
-    # Get the sets
-    incluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
-    incluster[index] = 1
-    outofcluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
-    outofcluster[invindex] = 1
-
-    # Get the matrixes
-    matrice = matrix.coo_matrix.todense().clip(0,1)
-    invmatrice = abs(matrice-1)
-
-    a = np.squeeze(np.asarray((incluster * matrice).sum(0)))
-    b = np.squeeze(np.asarray((incluster * invmatrice).sum(0)))
-    c = np.squeeze(np.asarray((outofcluster * matrice).sum(0)))
-    d = np.squeeze(np.asarray((outofcluster * invmatrice).sum(0)))
+    a,b,c,d, unifs = _get_abcd(matrix, index)
 
     tpr = a / np.array(a + c, dtype=float)
     fpr = b / np.array(b + d, dtype=float)
 
     BNS = abs(norm.ppf(tpr)-norm.ppf(fpr))
 
-    return sorted(zip(BNS, matrix.unifs), reverse=True)
+    return sorted(zip(BNS, unifs), reverse=True)
+
+def _get_pairwise_params(matrix, index):
+    """
+    Internal usage. Gets parameters for association measures that work with
+    pairwise comparison (usually for associating two words).
+    """
+
+    # Index is set; we need an index set for the "outgroup"
+    m = len(matrix.segments)
+    invindex = np.ones(m, dtype = bool)
+    invindex[index] = False
+
+    # Get the sets
+    incluster = np.zeros(matrix.csr_matrix.shape[0], dtype=int)
+    incluster[index] = 1
+    outofcluster = np.zeros(matrix.csr_matrix.shape[0], dtype=int)
+    outofcluster[invindex] = 1
+
+    # Get the matrixes
+    matrice = matrix.csr_matrix.todense().clip(0,1)
+    invmatrice = abs(matrice-1)
+
+    # Filter out words absent from index
+    notempty = np.squeeze(np.asarray(matrice[index].sum(0) != 0))
+    matrice = matrice.T[notempty].T
+    invmatrice = invmatrice.T[notempty].T
+    unifs = matrix.unifs[notempty]
+
+    # Calculate parameters
+    N = matrice.sum()
+    fXC = np.squeeze(np.asarray((incluster * matrice).sum(0)))
+    fX = np.squeeze(np.asarray(matrice.sum(0)))
+    fC = len(index) - invindex.sum()
+
+    return fX, fC, fXC, N, unifs
 
 def tScore(matrix, index):
     """
@@ -733,31 +715,11 @@ def tScore(matrix, index):
 
     """
 
-    # Index is set; we need an index set for the "outgroup"
-    m = len(matrix.segments)
-    invindex = np.ones(m, dtype = bool)
-    invindex[index] = False
+    fX, fC, fXC, N, unifs = _get_pairwise_params(matrix, index)
 
-    # Get the sets
-    incluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
-    incluster[index] = 1
-    outofcluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
-    outofcluster[invindex] = 1
+    tScore = ( fXC - ( fX * fC / float(N) ) ) / np.sqrt(fXC)
 
-    # Get the matrixes
-    matrice = matrix.coo_matrix.todense().clip(0,1)
-    invmatrice = abs(matrice-1)
-
-    N = matrice.sum()
-    fXC = np.squeeze(np.asarray((incluster * matrice).sum(0)))
-    fX = np.squeeze(np.asarray(matrice.sum(0)))
-    fC = len(index) - invindex.sum()
-
-    tScore = np.zeros(len(fXC))
-    i = fXC > 0
-    tScore = ( fXC[i] - ( fX[i] * fC / float(N) ) ) / np.sqrt(fXC[i])
-
-    return sorted(zip(tScore, matrix.unifs), reverse=True)
+    return sorted(zip(tScore, unifs), reverse=True)
 
 def mutual_information(matrix, index):
     """
@@ -776,28 +738,8 @@ def mutual_information(matrix, index):
 
     """
 
-    # Index is set; we need an index set for the "outgroup"
-    m = len(matrix.segments)
-    invindex = np.ones(m, dtype = bool)
-    invindex[index] = False
+    fX, fC, fXC, N, unifs = _get_pairwise_params(matrix, index)
 
-    # Get the sets
-    incluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
-    incluster[index] = 1
-    outofcluster = np.zeros(matrix.coo_matrix.shape[0], dtype=int)
-    outofcluster[invindex] = 1
-
-    # Get the matrixes
-    matrice = matrix.coo_matrix.todense().clip(0,1)
-    invmatrice = abs(matrice-1)
-
-    N = matrice.sum()
-    fXC = np.squeeze(np.asarray((incluster * matrice).sum(0)))
-    fX = np.squeeze(np.asarray(matrice.sum(0)))
-    fC = len(index) - invindex.sum()
-
-    MI = np.zeros(len(fXC))
-    i = fXC > 0
-    MI[i] = np.log( fXC[i] * N / (fX[i] * fC))
+    MI = np.log( fXC * N / (fX * fC))
 
     return sorted(zip(MI, matrix.unifs), reverse=True)
