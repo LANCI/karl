@@ -306,6 +306,8 @@ class TextParser:
     lower_freq_bound = 0.0
     upper_freq_bound = 1.0
 
+    remove_oneletter_words = True
+
 
     def __init__(self,
             segmentation_method = None,
@@ -356,7 +358,14 @@ class TextParser:
         unifs = set(chain(*segs))
 
         # Remove the small things
-        unifs = [ i for i in unifs if len(i) > 1 or (len(i) == 1 and i.isalpha()) ]
+        if self.remove_oneletter_words:
+            minlen = 2
+        else:
+            minlen = 1
+        unifs = [ i for i in unifs if len(i) >= minlen ]
+
+        # Remove non alphanumerical words
+        unifs = filter(str.isalpha, unifs)
 
         # Remove stopwords
         unifs = list(ifilterfalse(self.stoplist.__contains__, unifs))
@@ -501,12 +510,6 @@ def _get_abcd(matrix, index, fterm = False):
     invindex = np.ones(m, dtype = bool)
     invindex[index] = False
 
-    # Get the sets
-    incluster = np.zeros(matrix.csr_matrix.shape[0], dtype=int)
-    incluster[index] = 1
-    outofcluster = np.zeros(matrix.csr_matrix.shape[0], dtype=int)
-    outofcluster[invindex] = 1
-
     # Get the matrixes
     matrice = matrix.csr_matrix.todense().clip(0,1)
     invmatrice = abs(matrice-1)
@@ -517,10 +520,10 @@ def _get_abcd(matrix, index, fterm = False):
     invmatrice = invmatrice.T[notempty].T
     unifs = matrix.unifs[notempty]
 
-    a = np.squeeze(np.asarray((incluster * matrice).sum(0)))
-    b = np.squeeze(np.asarray((incluster * invmatrice).sum(0)))
-    c = np.squeeze(np.asarray((outofcluster * matrice).sum(0)))
-    d = np.squeeze(np.asarray((outofcluster * invmatrice).sum(0)))
+    a = np.squeeze(np.asarray(matrice[index].sum(0)))
+    b = np.squeeze(np.asarray(invmatrice[index].sum(0)))
+    c = np.squeeze(np.asarray(matrice[invindex].sum(0)))
+    d = np.squeeze(np.asarray(invmatrice[invindex].sum(0)))
 
     if fterm: # For chi2P
         return a,b,c,d, unifs, np.squeeze(np.asarray(matrice.sum(0)))
@@ -573,7 +576,7 @@ def chi2P(matrix, index):
 
     nC = a+b
     nnC = c+d
-    lambdai = fterm/matrice.sum()
+    lambdai = fterm/(a+b+c+d)
 
     ae = nC * (1 - np.exp(-lambdai))
     be = nC * np.exp(-lambdai)
@@ -674,12 +677,6 @@ def _get_pairwise_params(matrix, index):
     invindex = np.ones(m, dtype = bool)
     invindex[index] = False
 
-    # Get the sets
-    incluster = np.zeros(matrix.csr_matrix.shape[0], dtype=int)
-    incluster[index] = 1
-    outofcluster = np.zeros(matrix.csr_matrix.shape[0], dtype=int)
-    outofcluster[invindex] = 1
-
     # Get the matrixes
     matrice = matrix.csr_matrix.todense().clip(0,1)
     invmatrice = abs(matrice-1)
@@ -692,7 +689,7 @@ def _get_pairwise_params(matrix, index):
 
     # Calculate parameters
     N = matrice.sum()
-    fXC = np.squeeze(np.asarray((incluster * matrice).sum(0)))
+    fXC = np.squeeze(np.asarray(matrice[index]).sum(0))
     fX = np.squeeze(np.asarray(matrice.sum(0)))
     fC = len(index) - invindex.sum()
 
