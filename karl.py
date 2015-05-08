@@ -55,6 +55,7 @@ class Segmenter:
 
     wordsep = espaces
     charfilter_func = None
+    text_segments = None
 
     def __init__(self, word_separator = espaces, charfilter_function = charfilter):
         self.wordsep = word_separator
@@ -103,6 +104,8 @@ class ParagraphSegmenter(Segmenter):
         # Split
         r = re.split(self.sep, text)
 
+        self.text_segments = r
+
         # Apply character filter
         r = map(self.charfilter_func, r)
 
@@ -146,6 +149,8 @@ class SentenceSegmenter(Segmenter):
     def parse(self, text):
         t = self.badendings.sub(" ",text)
         r = self.tokenizer.tokenize(t)
+
+        self.text_segments = r
 
         # Apply character filter
         r = map(self.charfilter_func, r)
@@ -345,13 +350,13 @@ class TextParser:
 
         segs = np.array(self.segmentation_method.parse(text))
 
-        return self.parse_segmented_text(segs)
+        return self.parse_segmented_text(segs, self.segmentation_method.text_segments)
 
-    def parse_segmented_text(self, txtiter):
+    def parse_segmented_text(self, txtiter, text_segments = None):
         """
         Parses text that has already been segmented into a matrix.
         """
-        mat = Matrix()
+        mat = Matrix(text_segments = text_segments)
         segs = txtiter
 
         # Build unif & domif lists
@@ -365,7 +370,7 @@ class TextParser:
         unifs = [ i for i in unifs if len(i) >= minlen ]
 
         # Remove non alphanumerical words
-        unifs = filter(str.isalpha, unifs)
+        unifs = filter(type(unifs[0]).isalpha, unifs)
 
         # Remove stopwords
         unifs = list(ifilterfalse(self.stoplist.__contains__, unifs))
@@ -426,14 +431,17 @@ class Matrix:
     Object based on scipy's sparse matrix, holds word-space model data.
     """
     csr_matrix = None
+    text_segments = []
     segments = np.array([[]])
     unifs = np.array([])
     domifs = np.array([])
 
-    def __init__(self, csr_matrix = None, segments = None, unifs = None, domifs = None):
+    def __init__(self, csr_matrix = None, text_segments = None, segments = None, unifs = None, domifs = None):
         if csr_matrix != None:
             self.csr_matrix = csr_matrix
 
+        if text_segments != None:
+            self.text_segments = text_segments
         if segments != None:
             self.segments = np.array(segments)
         if unifs != None:
