@@ -441,7 +441,7 @@ class Matrix:
             self.csr_matrix = csr_matrix
 
         if text_segments != None:
-            self.text_segments = text_segments
+            self.text_segments = list(text_segments)
         if segments != None:
             self.segments = np.array(segments)
         if unifs != None:
@@ -505,6 +505,56 @@ class Matrix:
         idx = self.csr_matrix.sum(0) == 0
         self.del_column(idx)
 
+    def tofile(self, file):
+        """
+        Save full Matrix object to a file, along with pertinent information.
+        """
+        np.savez_compressed(
+            type = "Matrix",
+            text_segments = np.array(self.text_segments),
+            segments = self.segments,
+            unifs = self.unifs,
+            domifs = self.domifs,
+            **_csrmat2arrays(self.csr_matrix)
+        )
+
+#
+# Methods related to saving matrixes
+#
+
+def _csrmat2arrays(mat):
+    """
+    Converts a csr sparse matrix into arrays, to facilitate saving.
+    """
+    return {
+        "csr_data": mat.data,
+        "csr_indices": mat.indices,
+        "csr_indptr": mat.indptr,
+        "csr_shape": mat.shape
+    }
+
+def _arrays2csr_mat(arraydict):
+    """
+    Converts a dict of arrays back into a csr_matrix, presumably after
+    retrieving saved data.
+    """
+    return sp.csr_matrix(
+            (arraydict["csr_data"],
+             arraydict["csr_indices"],
+             arraydict["csr_indptr"]),
+            shape="csr_shape")
+
+def fromfile(file):
+    data = np.load(file)
+
+    if data["type"].tostring() == "Matrix":
+        return Matrix(
+            csr_matrix = _arrays2csr_mat(data),
+            segments = data["segments"],
+            text_segments = data["text_segments"],
+            unifs = data["unifs"],
+            domifs = data["domifs"]
+        )
 #
 # Association measures
 #
