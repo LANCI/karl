@@ -8,6 +8,7 @@ import collections as coll
 import scipy.sparse as sp
 from itertools import chain, ifilter, ifilterfalse
 from scipy.stats import norm
+import types
 
 from pattern import vector
 
@@ -452,6 +453,9 @@ class Matrix:
     def __repr__(self):
         return self.csr_matrix.__repr__()
 
+    def __len__(self):
+        return self.csr_matrix.shape[0]
+
     def _str2colindex(self,s):
         if type(s) not in [str, unicode]:
             return s
@@ -510,6 +514,7 @@ class Matrix:
         Save full Matrix object to a file, along with pertinent information.
         """
         np.savez_compressed(
+            file,
             type = "Matrix",
             text_segments = np.array(self.text_segments),
             segments = self.segments,
@@ -518,6 +523,35 @@ class Matrix:
             **_csrmat2arrays(self.csr_matrix)
         )
 
+    # Various weight adjustment techniques...
+
+    def adjust_weight(self, method = "tfidf"):
+        if type(method) in [str, unicode]:
+            m = re.sub("[^a-z]","", method.lower())
+
+            if m == "tfidf":
+                self.adjust_weight_tfidf()
+            elif m == "normalize":
+                self.normalize()
+
+        elif isinstance(method, types.FunctionType):
+            method(self)
+
+    def adjust_weight_tfidf(self):
+        mat = np.array(self.csr_matrix.todense())
+
+        tf = (mat.T / mat.sum(1)).T
+        idf = np.zeros(mat.shape, dtype = float)
+        idf[mat!=0] = np.log( len(self) / mat[mat!=0] )
+
+        mat = tf * idf
+
+        self.csr_matrix = sp.csr_matrix(mat)
+
+    def normalize(self):
+        mat = np.array(self.csr_matrix.todense())
+        mat = mat/mat.sum(1)
+        self.csr_matrix = sp.csr_matrix(mat)
 #
 # Methods related to saving matrixes
 #
