@@ -576,7 +576,7 @@ def _arrays2csr_mat(arraydict):
             (arraydict["csr_data"],
              arraydict["csr_indices"],
              arraydict["csr_indptr"]),
-            shape="csr_shape")
+            shape=arraydict["csr_shape"])
 
 def fromfile(file):
     data = np.load(file)
