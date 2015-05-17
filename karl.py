@@ -264,9 +264,11 @@ class Stemmer:
         reflects the one that they'll have after digitization.
         """
 
-        s = map(vector.stem, words)
-        s = map(s.index, s)
-        self.map = np.array(s)
+        su = map(vector.stem, words)
+        si = map(su.index, su)
+        self.map = np.array(si)
+
+        return su
 
     def parse(self, wordlist):
         return self.map[wordlist]
@@ -376,14 +378,12 @@ class TextParser:
         # Remove stopwords
         unifs = list(ifilterfalse(self.stoplist.__contains__, unifs))
 
-        # Save unifs and domifs
-        mat.unifs = np.array(unifs)
-        mat.domifs = np.arange(len(segs))
-
         #Apply word filter (e.g. stemmer/lemmatizer), digitizes
 
         if self.wordfilter != None:
-            self.wordfilter.build(unifs)
+            funifs = self.wordfilter.build(unifs)
+        else:
+            funifs = unifs
 
         segments = []
         for seg in segs:
@@ -419,6 +419,10 @@ class TextParser:
             data.extend(c.values())
 
             segnum += 1
+
+        # Save unifs and domifs
+        mat.unifs = np.array(funifs)
+        mat.domifs = np.arange(len(segs))
 
         # Save Matrix
         mat.segments = np.array(segs)
@@ -538,19 +542,19 @@ class Matrix:
             method(self)
 
     def adjust_weight_tfidf(self):
-        mat = np.array(self.csr_matrix.todense())
+        mat = np.array(self.csr_matrix.todense(), dtype=float)
 
         tf = (mat.T / mat.sum(1)).T
         idf = np.zeros(mat.shape, dtype = float)
-        idf[mat!=0] = np.log( len(self) / mat[mat!=0] )
+        idf[mat>0] = np.log( mat.shape[0] / mat[mat>0] )
 
         mat = tf * idf
 
         self.csr_matrix = sp.csr_matrix(mat)
 
     def normalize(self):
-        mat = np.array(self.csr_matrix.todense())
-        mat = mat/mat.sum(1)
+        mat = np.array(self.csr_matrix.todense(), dtype=float)
+        mat = (mat.T/mat.sum(1)).T
         self.csr_matrix = sp.csr_matrix(mat)
 #
 # Methods related to saving matrixes
@@ -576,7 +580,7 @@ def _arrays2csr_mat(arraydict):
             (arraydict["csr_data"],
              arraydict["csr_indices"],
              arraydict["csr_indptr"]),
-            shape=arraydict["csr_shape"])
+            shape = arraydict["csr_shape"])
 
 def fromfile(file):
     data = np.load(file)
