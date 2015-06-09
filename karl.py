@@ -836,3 +836,72 @@ def mutual_information(matrix, index):
     MI = np.log( fXC * N / (fX * fC))
 
     return sorted(zip(MI, matrix.unifs), reverse=True)
+    
+def rf_fimportances(matrix, index):
+    """
+    Calculates word ranks based on feature importance for classification via random forests.
+    
+    Parameters
+    ----------
+
+    matrix: karl.Matrix
+        The matrix in which the association is to be calculated
+
+    index: list of booleans or list of integers
+        Indexes segments which form the extension with which the association is
+        to be measured.
+
+    """
+    hyperparam_dict = {'bootstrap': ['True', 'False'], 'min_samples_leaf': [1], 
+                       'n_estimators': [200], 'min_samples_split': [2],
+                       'criterion': ['gini', 'entropy'],
+                       'max_features': ['sqrt', 'log2']}
+                       
+    #Split on train set and test set indexes (using domifs)            
+    X_train, X_test, dmfs_train,  dmfs_test, = train_test_split(matrix.csr_matrix.todense(), 
+                                                               matrix.domifs, test_size=0.3, random_state=13)
+    #Build and train model
+    mdl = RandomForestClassifier(random_state = 11)
+    mdl_optim = GridSearchCV(mdl, param_grid = hyperparam_dict) 
+    mdl_optim.fit(X_train, index[dmfs_train])
+    
+    #Predict and get importances
+    y_true, y_pred = index[dmfs_test], mdl_optim.predict(X_test)
+    print(classification_report(y_true, y_pred))
+    dim_importances = mdl_optim.best_estimator_.feature_importances_
+    
+    return sorted(zip(dim_importances, matrix.unifs), reverse=True)
+
+
+def svm_fimportances(matrix, index):
+    """
+    Calculates word ranks based on feature importance for classification via 
+    Suport Vector Machines (SVM).
+
+    Parameters
+    ----------
+
+    matrix: karl.Matrix
+        The matrix in which the association is to be calculated
+
+    index: list of booleans or list of integers
+        Indexes segments which form the extension with which the association is
+        to be measured.
+
+    """
+    hyperparam_dict = [{'kernel': ['linear'], 'C': 10. ** np.arange(-5,5)}]
+                       
+    #Split on train set and test set indexes (using domifs)            
+    X_train, X_test, dmfs_train,  dmfs_test, = train_test_split(matrix.csr_matrix.todense(), 
+                                                               matrix.domifs, test_size=0.3, random_state=13)
+    #Build and train model
+    mdl = sk.svm.SVC()
+    mdl_optim = GridSearchCV(mdl, param_grid = hyperparam_dict) 
+    mdl_optim.fit(X_train, index[dmfs_train])
+    
+    #Predict and get importances
+    y_true, y_pred = index[dmfs_test], mdl_optim.predict(X_test)
+    print(classification_report(y_true, y_pred))
+    dim_importances = mdl_optim.best_estimator_.coef_.flat
+    
+    return sorted(zip(dim_importances, matrix.unifs), reverse=True)
