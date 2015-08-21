@@ -1,5 +1,5 @@
 # Karl
-by Louis Chartrand, 2015<br>
+by Louis Chartrand & José A. López González, 2015<br>
 Laboratoire d'analyse cognitive de l'information (LANCI)<br>
 Université du Québec à Montréal (UQAM)
 
